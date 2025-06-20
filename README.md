@@ -1,4 +1,4 @@
-# html 이미지 추출기
+# html Image Extractor (html 이미지 추출기)
 
 ## 소개
 
