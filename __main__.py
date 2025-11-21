@@ -4,18 +4,15 @@ import shutil
 import tkinter as tk
 from collections import defaultdict
 from tkinter import filedialog, messagebox, ttk
-
-import requests
 from bs4 import BeautifulSoup
-
+import urllib.request
 
 # tkinter GUI 설정
 root = tk.Tk()
-root.title("HTML 이미지 다운로드 추출기")
+root.title("HTML 링크 다운로드 프로그램")
 root.geometry("500x550")
 
 selected_path = ""
-
 
 # 경로 선택 함수
 def choose_folder():
@@ -23,7 +20,6 @@ def choose_folder():
     selected_path = filedialog.askdirectory(title="HTML 파일이 있는 폴더를 선택하세요")
     if selected_path:
         path_label.config(text=selected_path)
-
 
 # HTML 처리 함수
 def process_html_files():
@@ -33,12 +29,12 @@ def process_html_files():
 
     tag = tag_entry.get().strip()
     class_name = class_entry.get().strip()
+
     if not tag or not class_name:
         messagebox.showwarning("경고", "태그와 클래스 이름을 입력해주세요.")
         return
 
     selector = f"{tag}.{class_name}"
-
     html_files = glob.glob(os.path.join(selected_path, "*.html"))
 
     if not html_files:
@@ -49,65 +45,65 @@ def process_html_files():
     progress_bar["value"] = 0
     log_listbox.delete(0, tk.END)
 
-    # 이미지 확장자 목록
-    image_exts = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
-
     for html_file in html_files:
 
+        # HTML 파일명에서 제목 추출
         title = os.path.splitext(os.path.basename(html_file))[0].split(' - ')[0]
+        filename_counter = defaultdict(int)
 
-        # 이미지 저장 폴더 생성
+        # 출력 폴더 생성
         output_dir = os.path.join(selected_path, title)
         os.makedirs(output_dir, exist_ok=True)
 
+        # HTML 파싱
         with open(html_file, 'r', encoding='utf-8') as file:
             html = file.read()
 
         soup = BeautifulSoup(html, 'html.parser')
         target_div = soup.select_one(selector)
 
+        used_dirs = set()
+
         if target_div:
             idx = 0
-            for a_tag in target_div.find_all('a'):
-                href = a_tag.get('href', '')
 
+            # a 태그의 href만 다운로드
+            for a in target_div.find_all('a'):
+                href = a.get('href', '')
                 if not href:
                     continue
 
-                # 이미지 확장자 여부 확인
-                if not href.lower().endswith(image_exts):
+                # 절대 경로일 경우 처리
+                if href.startswith("http://") or href.startswith("https://"):
+                    src_path = href
+                else:
+                    src_path = os.path.normpath(os.path.join(os.path.dirname(html_file), href))
+
+                filename = os.path.basename(src_path)
+                if not filename:
                     continue
 
-                # 유효한 URL인지 확인
-                if not (href.startswith("http://") or href.startswith("https://")):
-                    log_listbox.insert(tk.END, f"⚠ URL이 아님: {href}")
+                # 확장자 추출
+                original_name, ext = os.path.splitext(filename)
+                if not ext:
+                    ext = ".dat"  # 확장자가 없는 경우 기본값
+
+                count = filename_counter[filename]
+                if count != 0:
                     continue
 
-                try:
-                    response = requests.get(href, stream=True, timeout=10)
-                    response.raise_for_status()
-                except Exception as e:
-                    log_listbox.insert(tk.END, f"⚠ 다운로드 실패: {href} - {e}")
-                    continue
-
-                # 파일명 생성
-                _, ext = os.path.splitext(href)
                 idx += 1
                 new_filename = f"{title} ({idx}){ext}"
                 dst_path = os.path.join(output_dir, new_filename)
 
-                # 이미지 저장
                 try:
-                    with open(dst_path, 'wb') as f:
-                        for chunk in response.iter_content(1024):
-                            f.write(chunk)
-
-                    log_listbox.insert(tk.END, f"✔ 다운로드: {href} → {new_filename}")
-
+                    # 다운로드 실행
+                    urllib.request.urlretrieve(src_path, dst_path)
+                    log_listbox.insert(tk.END, f"⬇ 다운로드 완료: {new_filename}")
                 except Exception as e:
-                    log_listbox.insert(tk.END, f"⚠ 저장 실패: {dst_path} - {e}")
+                    log_listbox.insert(tk.END, f"⚠ 다운로드 실패: {src_path} - {e}")
 
-        # HTML 삭제 옵션
+        # HTML 파일 삭제 옵션
         if delete_html_var.get():
             try:
                 os.remove(html_file)
@@ -120,9 +116,8 @@ def process_html_files():
 
     messagebox.showinfo("완료", "모든 작업이 완료되었습니다.")
 
-
-# GUI 위젯들
-label = tk.Label(root, text="HTML 파일에서 a태그 이미지 링크 다운로드", pady=10)
+# GUI 시작
+label = tk.Label(root, text="HTML에서 a태그 링크 다운로드 프로그램", pady=10)
 label.pack()
 
 select_btn = tk.Button(root, text="폴더 선택", command=choose_folder)
@@ -148,9 +143,8 @@ class_entry.pack(side="left")
 btn = tk.Button(root, text="작업 시작", command=process_html_files)
 btn.pack(pady=5)
 
-# 체크박스들
+# 체크박스
 delete_html_var = tk.BooleanVar(value=True)
-
 check2 = tk.Checkbutton(root, text="HTML 파일 삭제", variable=delete_html_var)
 check2.pack()
 
@@ -161,6 +155,7 @@ progress_bar.pack(pady=10)
 # 로그 출력 리스트박스
 log_frame = tk.LabelFrame(root, text="작업 로그")
 log_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
 log_listbox = tk.Listbox(log_frame, height=10)
 log_listbox.pack(fill="both", expand=True)
 
