@@ -5,11 +5,13 @@ import tkinter as tk
 from collections import defaultdict
 from tkinter import filedialog, messagebox, ttk
 
+import requests
 from bs4 import BeautifulSoup
+
 
 # tkinter GUI 설정
 root = tk.Tk()
-root.title("HTML 이미지 추출기")
+root.title("HTML 이미지 다운로드 추출기")
 root.geometry("500x550")
 
 selected_path = ""
@@ -47,9 +49,14 @@ def process_html_files():
     progress_bar["value"] = 0
     log_listbox.delete(0, tk.END)
 
+    # 이미지 확장자 목록
+    image_exts = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
+
     for html_file in html_files:
+
         title = os.path.splitext(os.path.basename(html_file))[0].split(' - ')[0]
-        filename_counter = defaultdict(int)
+
+        # 이미지 저장 폴더 생성
         output_dir = os.path.join(selected_path, title)
         os.makedirs(output_dir, exist_ok=True)
 
@@ -59,46 +66,48 @@ def process_html_files():
         soup = BeautifulSoup(html, 'html.parser')
         target_div = soup.select_one(selector)
 
-        used_dirs = set()
-
         if target_div:
             idx = 0
-            for img in target_div.find_all('img'):
-                src = img.get('src', '')
-                if not src:
+            for a_tag in target_div.find_all('a'):
+                href = a_tag.get('href', '')
+
+                if not href:
                     continue
 
-                src_path = os.path.normpath(os.path.join(os.path.dirname(html_file), src))
-                if not os.path.isfile(src_path):
+                # 이미지 확장자 여부 확인
+                if not href.lower().endswith(image_exts):
                     continue
 
-                image_dir = os.path.normpath(os.path.dirname(src_path))
-                used_dirs.add(image_dir)
-
-                filename = os.path.basename(src_path)
-                original_name, ext = os.path.splitext(filename)
-
-                count = filename_counter[filename]
-                if count != 0:
+                # 유효한 URL인지 확인
+                if not (href.startswith("http://") or href.startswith("https://")):
+                    log_listbox.insert(tk.END, f"⚠ URL이 아님: {href}")
                     continue
 
+                try:
+                    response = requests.get(href, stream=True, timeout=10)
+                    response.raise_for_status()
+                except Exception as e:
+                    log_listbox.insert(tk.END, f"⚠ 다운로드 실패: {href} - {e}")
+                    continue
+
+                # 파일명 생성
+                _, ext = os.path.splitext(href)
                 idx += 1
                 new_filename = f"{title} ({idx}){ext}"
                 dst_path = os.path.join(output_dir, new_filename)
-                shutil.move(src_path, dst_path)
-                log_listbox.insert(tk.END, f"✔ {filename} → {new_filename}")
 
-        # 폴더 삭제
-        if delete_images_var.get():
-            for image_dir in used_dirs:
-                if os.path.isdir(image_dir):
-                    try:
-                        shutil.rmtree(image_dir)
-                        log_listbox.insert(tk.END, f"🗑 폴더 삭제됨: {image_dir}")
-                    except Exception as e:
-                        log_listbox.insert(tk.END, f"⚠ 폴더 삭제 실패: {image_dir} - {e}")
+                # 이미지 저장
+                try:
+                    with open(dst_path, 'wb') as f:
+                        for chunk in response.iter_content(1024):
+                            f.write(chunk)
 
-        # HTML 파일 삭제
+                    log_listbox.insert(tk.END, f"✔ 다운로드: {href} → {new_filename}")
+
+                except Exception as e:
+                    log_listbox.insert(tk.END, f"⚠ 저장 실패: {dst_path} - {e}")
+
+        # HTML 삭제 옵션
         if delete_html_var.get():
             try:
                 os.remove(html_file)
@@ -113,7 +122,7 @@ def process_html_files():
 
 
 # GUI 위젯들
-label = tk.Label(root, text="HTML 파일 폴더에서 이미지 추출 및 정리", pady=10)
+label = tk.Label(root, text="HTML 파일에서 a태그 이미지 링크 다운로드", pady=10)
 label.pack()
 
 select_btn = tk.Button(root, text="폴더 선택", command=choose_folder)
@@ -140,12 +149,9 @@ btn = tk.Button(root, text="작업 시작", command=process_html_files)
 btn.pack(pady=5)
 
 # 체크박스들
-delete_images_var = tk.BooleanVar(value=True)
 delete_html_var = tk.BooleanVar(value=True)
 
-check1 = tk.Checkbutton(root, text="이미지 원본 폴더 삭제", variable=delete_images_var)
 check2 = tk.Checkbutton(root, text="HTML 파일 삭제", variable=delete_html_var)
-check1.pack()
 check2.pack()
 
 # 진행률 바
